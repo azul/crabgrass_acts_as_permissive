@@ -3,6 +3,36 @@ require 'activesupport'
 class Permission < ActiveRecord::Base
   belongs_to :object, :polymorphic => true
 
+  def allows?(keys)
+    not_allowed = Permission.bits_for_keys(keys) & ~bitmask
+    not_allowed == 0
+  end
+
+  def allow!(keys, options = {})
+    if options[:reset]
+      self.mask = Permission.bits_for_keys(keys)
+    else
+      self.mask |= Permission.bits_for_keys(keys)
+    end
+    save!
+  end
+
+  def disallow!(keys)
+    self.mask &= ~Permission.bits_for_keys(keys)
+    save!
+  end
+
+  protected
+
+  # we add an or_mask to the permissions when getting the
+  # current_user_permission_set. This contains all permissions the
+  # user has through different groups. If it's there - use it.
+  def bitmask
+    self.respond_to?(:or_mask) ?
+      or_mask.to_i :
+      mask
+  end
+
   def self.bits_for_keys(keys)
     keys = [keys] unless keys.is_a? Array
     keys.inject(0) {|any, key| any | bit_for(key)}
@@ -34,31 +64,19 @@ module ActsAsPermissive
 
         class_eval do
           def allows?(keys)
-            not_allowed = Permission.bits_for_keys(keys) & ~bitmask
-            not_allowed == 0
+            current_user_permission_set.allows?(keys)
           end
 
           def allow!(entity, keys, options = {})
             permission = permissions.find_or_initialize_by_entity_code(entity.entity_code)
-            if options[:reset]
-              permission.mask = Permission.bits_for_keys(keys)
-            else
-              permission.mask |= Permission.bits_for_keys(keys)
-            end
-            permission.save!
+            permission.allow! keys, options
           end
 
           def disallow!(entity, keys)
             permission = permissions.find_or_initialize_by_entity_code(entity.entity_code)
-            permission.mask &= ~Permission.bits_for_keys(keys)
-            permission.save!
+            permission.disallow! keys
           end
 
-          protected
-
-            def bitmask
-              current_user_permission_set.or_mask.to_i
-            end
         end
       end
     end
