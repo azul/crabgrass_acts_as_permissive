@@ -130,16 +130,61 @@ class ActsAsSiteLimitedTest < Test::Unit::TestCase
     reset_db
   end
 
-  def test_query_caching
-    # all @jazz users may see @jazz's groups
-    permission = @jazz.permissions.create :mask => 1, :entity_code => @jazz.id
-    pages = Page.find :all, :include => {:owner => :current_user_permission_set}
-    #brute force...
-    assert_equal @miles, pages.first
-    assert_equal "1", pages.first.owner.current_user_permission_set.or_mask
+  def test_permission_functions
+    @fusion.allow! @soul, :burdon
+    @fusion.allow! @jazz, [:pester, :spy, :see]
+    assert @fusion.allows?(:pester), "fusion should allow me to pester as I am a jazz member."
+    assert !@fusion.allows?(:burdon), "fusion should not allow me to burdon as I am not a soul member."
+    # I'm a soul member now
+    @soul.users << @me
+    @me.reload
+    @fusion.reload
+    assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
-  def test_bit_mask_works
+  def test_query_caching
+    # all @jazz users may see @jazz's groups
+    @jazz.allow! @jazz, :see
+    pages = Page.find :all, :include => {:owner => :current_user_permission_set}
+    # we remove the permission but it has already been cached...
+    assert @jazz.allows?(:see), ":see should be allowed to current_user."
+    @jazz.disallow!(@jazz, :see)
+    @jazz.reload
+    assert !@jazz.allows?(:see), "the :see permission should have been revoked."
+    assert_equal @miles, pages.first
+    assert pages.first.owner.allows?(:see), "pages should have cached the permission."
+  end
+
+  module ActsAsPermissive::Permissions
+    DO_CRAZY_THINGS = 8
+  end
+
+  def test_adding_symbols
+    @jazz.allow! @jazz, :do_crazy_things
+    assert @jazz.allows?(:do_crazy_things), "I should be able to add keys in different places"
+    @jazz.allow! @jazz, :see
+    @jazz.reload
+    assert @jazz.allows?(:see), "Old keys should still work after adding new ones."
+  end
+
+
+
+  ## INTERNALS
+  #
+  #  tests that access internal structures of the implementation
+  #  Please use the functions called in the tests above instead.
+  #
+
+  def test_bit_mask
+    @fusion.allow! @soul, :burdon
+    p = @fusion.permissions.find_by_entity_code(@soul.entity_code)
+    assert_equal 8, p.mask
+    p = @fusion.allow! @jazz, [:pester, :spy, :see]
+    p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
+    assert_equal 21, p.mask
+  end
+
+  def test_bit_mask_with_pages
     # all @jazz members may see @jazz's groups
     @jazz.permissions.create :mask => 2, :entity_code => @jazz.id
     # all @soul members may see @jazz
@@ -156,20 +201,5 @@ class ActsAsSiteLimitedTest < Test::Unit::TestCase
     assert_equal "7", pages.first.owner.current_user_permission_set.or_mask
   end
 
-  def test_permission_functions
-    @fusion.allow! @soul, :burdon
-    p = @fusion.permissions.find_by_entity_code(@soul.entity_code)
-    assert_equal 8, p.mask
-    p = @fusion.allow! @jazz, [:pester, :spy, :see]
-    p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
-    assert_equal 21, p.mask
-    assert @fusion.allows? :pester
-    assert !@fusion.allows?(:burdon)
-    # I'm a soul member now
-    @soul.users << @me
-    @me.reload
-    @fusion.reload
-    assert @fusion.allows? [:burdon, :spy, :see]
-  end
 end
 
