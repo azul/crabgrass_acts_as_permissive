@@ -90,17 +90,10 @@ end
 class Entity < ActiveRecord::Base
   has_and_belongs_to_many :pages
   has_and_belongs_to_many :users
-  acts_as_permissive
   alias_method :entity_code, :id
-end
+  # let's define the different permissions
+  acts_as_permissive :keys => [:see, :see_groups, :pester, :burdon, :spy]
 
-# let's define the different permissions
-module ActsAsPermissive::Permissions
-  SEE = 0
-  SEE_GROUPS = 1
-  PESTER = 2
-  BURDON = 3
-  SPY = 4
 end
 
 ##
@@ -109,7 +102,7 @@ end
 
 setup_db
 
-class ActsAsSiteLimitedTest < Test::Unit::TestCase
+class ActsAsPermissiveTest < Test::Unit::TestCase
 
   def setup
     @fusion = Entity.create! :name => "fusion"

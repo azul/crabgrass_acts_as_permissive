@@ -4,21 +4,21 @@ class Permission < ActiveRecord::Base
   belongs_to :object, :polymorphic => true
 
   def allows?(keys)
-    not_allowed = Permission.bits_for_keys(keys) & ~bitmask
+    not_allowed = bits_for_keys(keys) & ~bitmask
     not_allowed == 0
   end
 
   def allow!(keys, options = {})
     if options[:reset]
-      self.mask = Permission.bits_for_keys(keys)
+      self.mask = bits_for_keys(keys)
     else
-      self.mask |= Permission.bits_for_keys(keys)
+      self.mask |= bits_for_keys(keys)
     end
     save!
   end
 
   def disallow!(keys)
-    self.mask &= ~Permission.bits_for_keys(keys)
+    self.mask &= ~bits_for_keys(keys)
     save!
   end
 
@@ -33,14 +33,11 @@ class Permission < ActiveRecord::Base
       mask
   end
 
-  def self.bits_for_keys(keys)
+  def bits_for_keys(keys)
     keys = [keys] unless keys.is_a? Array
-    keys.inject(0) {|any, key| any | bit_for(key)}
+    keys.inject(0) {|any, key| any | object.class.bit_for(key)}
   end
 
-  def self.bit_for(key)
-    ActsAsPermissive::Permissions.hash[key.to_s.downcase.to_sym] || 0
-  end
 end
 
 module ActsAsPermissive
@@ -60,8 +57,6 @@ module ActsAsPermissive
           :select => '*, BIT_OR(mask) as or_mask',
           :conditions => 'entity_code IN (#{User.current.entity_access_cache.join(", ")})'
 
-
-
         class_eval do
           def allows?(keys)
             current_user_permission_set.allows?(keys)
@@ -77,31 +72,47 @@ module ActsAsPermissive
             permission.disallow! keys
           end
 
+          def self.bit_for(key)
+            ActsAsPermissive::Permissions.bit_for(self.name, key)
+          end
+
+          def self.permission_keys=(keys)
+            ActsAsPermissive::Permissions.set_bits(self.name, keys)
+          end
+        end
+        if options[:keys]
+          self.permission_keys = options[:keys]
         end
       end
     end
   end
 
   module Permissions
-    def self.const_set(*args)
-      @@hash = nil
-      super
+
+    def self.set_bits(class_name, keys)
+      @@hash ||= {}
+      @@hash[class_name] = build_bit_hash(keys)
     end
 
-    def self.hash
-      @@hash ||= begin
-        bitwise_hash = constants.inject({}) do |hash, constant_name|
-          hash[constant_name.downcase] = 2 ** ActsAsPermissive::Permissions.const_get(constant_name.to_sym)
-          hash
+    def self.bit_for(class_name, key)
+      @@hash[class_name][key.to_s.downcase.to_sym] || 0
+    end
+
+    protected
+    def self.build_bit_hash(keys)
+      bitwise_hash = {}
+      if keys.is_a? Array
+        keys.each_with_index do |key, index|
+          bitwise_hash[key] = 2 ** index
         end
-        inverted_hash = bitwise_hash.invert
-        bitwise_hash.values.sort.inject(ActiveSupport::OrderedHash.new) do |hash, value|
-          hash[inverted_hash[value].to_sym] = value
-          hash
+      elsif keys.is_a? Hash
+        keys.each do |key, value|
+          bitwise_hash[key] = 2 ** value
         end
-      rescue ArgumentError
-        raise StandartError.new("Permissions must be integers or longs.")
-       end
+      end
+      bitwise_hash
+    rescue ArgumentError
+      raise StandartError.new("Permissions must be integers or longs.")
     end
   end
 end
