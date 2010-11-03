@@ -93,12 +93,12 @@ class Entity < ActiveRecord::Base
   has_and_belongs_to_many :users
   alias_method :entity_code, :id
   # let's define the different permissions
-  acts_as_permissive :keys => [:see, :see_groups, :pester, :burdon, :spy]
+  acts_as_permissive :see, :see_groups, :pester, :burdon, :spy
 end
 
 # some permissive class with other keys
 class Society < ActiveRecord::Base
-  acts_as_permissive :keys => [:publish, :play, :sing]
+  acts_as_permissive :publish, :play, :sing
 end
 
 ##

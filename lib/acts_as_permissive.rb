@@ -50,7 +50,7 @@ module ActsAsPermissive
       # Permission resolution uses entity codes so that we can resolve permissions
       # via groups without joins
 
-      def self.acts_as_permissive(options = {})
+      def self.acts_as_permissive(permissions*)
         has_many :permissions, :as => :object
         # let's use AR magic to cache permissions from the controller like this...
         # @pages = Page.find... :include => {:owner => :current_user_permission_set}
@@ -79,13 +79,13 @@ module ActsAsPermissive
             ActsAsPermissive::Permissions.bit_for(self.name, key)
           end
 
-          def self.add_permissions(keys)
-            keys = [keys] unless keys.is_a? Enumerable
+          def self.add_permissions(keys*)
+            keys = keys.first if keys.first.is_a? Enumerable
             ActsAsPermissive::Permissions.add_bits(self.name, keys)
           end
         end
-        if options[:keys]
-          self.add_permissions(options[:keys])
+        if permissions.any?
+          self.add_permissions(permissions)
         end
       end
     end
