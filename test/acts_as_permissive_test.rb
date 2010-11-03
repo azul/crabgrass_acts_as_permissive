@@ -49,6 +49,7 @@ def setup_db
       t.column :entity_id, :integer
       t.column :page_id, :integer
     end
+    create_table :societies
   end
 end
 
@@ -93,7 +94,11 @@ class Entity < ActiveRecord::Base
   alias_method :entity_code, :id
   # let's define the different permissions
   acts_as_permissive :keys => [:see, :see_groups, :pester, :burdon, :spy]
+end
 
+# some permissive class with other keys
+class Society < ActiveRecord::Base
+  acts_as_permissive :keys => [:publish, :play, :sing]
 end
 
 ##
@@ -135,6 +140,18 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
+  def test_keys_in_different_class
+    @brave_new = Society.create!
+    @brave_new.allow! @jazz, :publish
+    assert @brave_new.allows?(:publish), "the publish key should work for society"
+    assert_raises ActsAsPermissive::PermissionError do
+      @brave_new.allow! @jazz, :see
+    end
+    assert_raises ActsAsPermissive::PermissionError do
+      @soul.allow! @jazz, :publish
+    end
+  end
+
   def test_query_caching
     # all @jazz users may see @jazz's groups
     @jazz.allow! @jazz, :see
@@ -153,6 +170,10 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
   end
 
   def test_adding_symbols
+    assert_raises ActsAsPermissive::PermissionError do
+      @jazz.allow! @jazz, :do_crazy_things
+    end
+    Entity.add_permissions :do_crazy_things
     @jazz.allow! @jazz, :do_crazy_things
     assert @jazz.allows?(:do_crazy_things), "I should be able to add keys in different places"
     @jazz.allow! @jazz, :see

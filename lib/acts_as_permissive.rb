@@ -41,6 +41,9 @@ class Permission < ActiveRecord::Base
 end
 
 module ActsAsPermissive
+
+  class PermissionError < StandardError; end;
+
   def self.included(base)
     base.class_eval do
       # This allows you to define permissions on the object that acts as permissive.
@@ -76,12 +79,13 @@ module ActsAsPermissive
             ActsAsPermissive::Permissions.bit_for(self.name, key)
           end
 
-          def self.permission_keys=(keys)
-            ActsAsPermissive::Permissions.set_bits(self.name, keys)
+          def self.add_permissions(keys)
+            keys = [keys] unless keys.is_a? Enumerable
+            ActsAsPermissive::Permissions.add_bits(self.name, keys)
           end
         end
         if options[:keys]
-          self.permission_keys = options[:keys]
+          self.add_permissions(options[:keys])
         end
       end
     end
@@ -89,30 +93,41 @@ module ActsAsPermissive
 
   module Permissions
 
-    def self.set_bits(class_name, keys)
+    def self.add_bits(class_name, keys)
       @@hash ||= {}
-      @@hash[class_name] = build_bit_hash(keys)
+      class_hash = @@hash[class_name] ||= {}
+      if keys.is_a? Hash
+        keys.reject!{|k,v| class_hash.keys.include? k}
+      elsif keys.is_a? Enumerable
+        keys.reject!{|k| class_hash.keys.include? k}
+      end
+      class_hash.merge! build_bit_hash(keys, @@hash[class_name].count)
     end
 
     def self.bit_for(class_name, key)
-      @@hash[class_name][key.to_s.downcase.to_sym] || 0
+      bit = @@hash[class_name][key.to_s.downcase.to_sym]
+      if bit.nil?
+        raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{class_name}'")
+      else
+        bit
+      end
     end
 
     protected
-    def self.build_bit_hash(keys)
+    def self.build_bit_hash(keys, offset)
       bitwise_hash = {}
-      if keys.is_a? Array
-        keys.each_with_index do |key, index|
-          bitwise_hash[key] = 2 ** index
-        end
-      elsif keys.is_a? Hash
+      if keys.is_a? Hash
         keys.each do |key, value|
           bitwise_hash[key] = 2 ** value
+        end
+      elsif keys.is_a? Enumerable
+        keys.each_with_index do |key, index|
+          bitwise_hash[key] = 2 ** (index + offset)
         end
       end
       bitwise_hash
     rescue ArgumentError
-      raise StandartError.new("Permissions must be integers or longs.")
+      raise ActsAsPermissive::PermissionError.new("Permission bits must be integers or longs.")
     end
   end
 end
