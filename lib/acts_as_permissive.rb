@@ -94,7 +94,7 @@ module ActsAsPermissive
           end
 
           def self.bit_for(key)
-            ActsAsPermissive::Permissions.bit_for(self.name, key)
+            ActsAsPermissive::Permissions.bit_for(self, key)
           end
 
           def self.add_permissions(*keys)
@@ -122,8 +122,8 @@ module ActsAsPermissive
       class_hash.merge! build_bit_hash(keys, @@hash[class_name].count)
     end
 
-    def self.bit_for(class_name, key)
-      bit = @@hash[class_name][key.to_s.downcase.to_sym]
+    def self.bit_for(klass, key)
+      bit = @@hash[key_for_class(klass)][key.to_s.downcase.to_sym]
       if bit.nil?
         raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{class_name}'")
       else
@@ -157,6 +157,17 @@ module ActsAsPermissive
       bitwise_hash
     rescue ArgumentError
       raise ActsAsPermissive::PermissionError.new("Permission bits must be integers or longs.")
+    end
+
+    def self.key_for_class(klass)
+      current=klass
+      until @@hash.keys.include?(current.name) do
+        current = current.superclass
+        if current.nil?
+          raise ActsAsPermissive::PermissionError.new("Class #{klass} not registered with acts_as_permissive.")
+        end
+      end
+      current.name
     end
   end
 end
