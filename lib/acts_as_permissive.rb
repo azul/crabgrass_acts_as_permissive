@@ -50,13 +50,29 @@ module ActsAsPermissive
           :as => :object,
           :conditions => 'entity_code IN (#{User.current.access_codes.join(", ")})'
 
+        named_scope :with_access, lambda { |key, user|
+          { :joins => :permissions,
+            :conditions => "entity_code IN (#{user.access_codes.join(", ")}) AND #{self.bit_for(key)} & ~mask = 0" }
+        }
+
         class_eval do
-          def allows?(keys, options = {})
-            if user=options[:to_user]
-              permissions.for_user(user).allow?(keys)
+
+          # short cut for current user - uses cached permissions
+          def allows?(keys)
+            current_user_permissions.allow?(keys)
+          end
+
+          def has_access!(key, user)
+            if has_access?(key, user)
+              return true
             else
-              current_user_permissions.allow?(keys)
+              # TODO: make the error message flexible and meaningful
+              raise PermissionDenied.new(I18n.t(:permission_denied))
             end
+          end
+
+          def has_access?(key, user)
+            permissions.for_user(user).allow?(key)
           end
 
           def allow!(entity, keys, options = {})
@@ -70,6 +86,7 @@ module ActsAsPermissive
           end
 
           def self.bits_for_keys(keys)
+            return ~0 if keys == :all
             keys = [keys] unless keys.is_a? Array
             keys.inject(0) {|any, key| any | self.bit_for(key)}
           end
