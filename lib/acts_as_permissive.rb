@@ -21,6 +21,9 @@ class Permission < ActiveRecord::Base
     save!
   end
 
+  def bits_for_keys(keys)
+    self.object.class.bits_for_keys(keys)
+  end
 end
 
 module ActsAsPermissive
