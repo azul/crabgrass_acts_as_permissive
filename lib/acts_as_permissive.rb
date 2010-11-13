@@ -76,13 +76,15 @@ module ActsAsPermissive
           end
 
           def allow!(entity, keys, options = {})
-            permission = permissions.find_or_initialize_by_entity_code(entity.entity_code.to_i)
+            code = ActsAsPermissive::Permissions.code_for_entity(entity)
+            permission = permissions.find_or_initialize_by_entity_code(code)
             permission.allow! keys, options
           end
 
           def disallow!(entity, keys)
-            permission = permissions.find_or_initialize_by_entity_code(entity.entity_code.to_i)
-            permission.disallow! keys
+            code = ActsAsPermissive::Permissions.code_for_entity(entity)
+            permission = permissions.find_by_entity_code(code)
+            permission.disallow!(keys) if permission
           end
 
           def self.bits_for_keys(keys)
@@ -126,6 +128,17 @@ module ActsAsPermissive
         raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{class_name}'")
       else
         bit
+      end
+    end
+
+    def self.code_for_entity(entity)
+      if entity.is_a? Symbol
+        code = case entity
+               when :all then 1
+               else raise ActsAsPermissive::PermissionError.new("ActsAsPermissive: Entity alias '#{entity}' is unknown.")
+               end
+      else
+        code = entity.entity_code.to_i
       end
     end
 
