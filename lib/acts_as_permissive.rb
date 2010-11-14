@@ -55,6 +55,7 @@ module ActsAsPermissive
 
         named_scope :with_access, lambda { |key, user|
           { :joins => :permissions,
+            :group => 'object_id, object_type',
             :conditions => "entity_code IN (#{user.access_codes.join(", ")}) AND #{self.bit_for(key)} & ~mask = 0" }
         }
 
