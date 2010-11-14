@@ -79,6 +79,16 @@ module ActsAsPermissive
             permissions.for_user(user).allow?(key)
           end
 
+          def public_permissions=(hash)
+            code = 1
+            permission = permissions.find_or_initialize_by_entity_code(code)
+            allow = hash.select{|k,v| v!=0}
+            disallow = hash.select{|k,v| v==0}
+            permission.allow! allow.map(&:first)
+            permission.disallow! disallow.map(&:first)
+          end
+
+
           def allow!(entity, keys, options = {})
             code = ActsAsPermissive::Permissions.code_for_entity(entity)
             permission = permissions.find_or_initialize_by_entity_code(code)
