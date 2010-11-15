@@ -39,6 +39,7 @@ module ActsAsPermissive
       def self.acts_as_permissive(*permissions)
 
         has_many :permissions, :as => :object do
+
           def allow?(keys)
             allowed = self.inject(0) {|any, permission| any | permission.mask}
             not_allowed = proxy_owner.class.bits_for_keys(keys) & ~allowed
@@ -48,10 +49,17 @@ module ActsAsPermissive
 
         # let's use AR magic to cache permissions from the controller like this...
         # @pages = Page.find... :include => {:owner => :current_user_permissions}
-        has_one :current_user_permissions,
+        has_many :current_user_permissions,
           :class_name => "Permission",
-          :as => :object,
-          :conditions => 'entity_code IN (#{User.current.access_codes.join(", ")})'
+          :conditions => 'entity_code IN (#{User.current.access_codes.join(", ")})',
+          :as => :object do
+          def allow?(keys)
+            allowed = self.inject(0) {|any, permission| any | permission.mask}
+            not_allowed = proxy_owner.class.bits_for_keys(keys) & ~allowed
+            not_allowed == 0
+          end
+        end
+
 
         named_scope :with_access, lambda { |key, user|
           { :joins => :permissions,
@@ -60,11 +68,6 @@ module ActsAsPermissive
         }
 
         class_eval do
-
-          # short cut for current user - uses cached permissions
-          def allows?(keys)
-            current_user_permissions.allow?(keys)
-          end
 
           def has_access!(key, user)
             if has_access?(key, user)
@@ -75,8 +78,14 @@ module ActsAsPermissive
             end
           end
 
-          def has_access?(key, user)
-            permissions.for_user(user).allow?(key)
+          def has_access?(key, user = User.current)
+            if user == User.current
+              # these might be cached through AR.
+              current_user_permissions.allow?(keys)
+            else
+              # the named scope might have changed so we need to reload.
+              permissions.for_user(user).reload.allow?(key)
+            end
           end
 
           def public_permissions=(hash)
