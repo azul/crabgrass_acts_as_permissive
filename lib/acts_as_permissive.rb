@@ -149,7 +149,7 @@ module ActsAsPermissive
     def self.bit_for(klass, key)
       bit = @@hash[key_for_class(klass)][key.to_s.downcase.to_sym]
       if bit.nil?
-        raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{class_name}'")
+        raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{klass.name}'")
       else
         bit
       end
