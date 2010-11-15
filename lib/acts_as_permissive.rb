@@ -40,7 +40,8 @@ module ActsAsPermissive
 
         has_many :permissions, :as => :object do
 
-          def allow?(keys)
+          def allow?(keys, reload=false)
+            self.reload if reload
             allowed = self.inject(0) {|any, permission| any | permission.mask}
             not_allowed = proxy_owner.class.bits_for_keys(keys) & ~allowed
             not_allowed == 0
@@ -81,10 +82,10 @@ module ActsAsPermissive
           def has_access?(key, user = User.current)
             if user == User.current
               # these might be cached through AR.
-              current_user_permissions.allow?(keys)
+              current_user_permissions.allow?(key)
             else
               # the named scope might have changed so we need to reload.
-              permissions.for_user(user).reload.allow?(key)
+              permissions.for_user(user).allow?(key, true)
             end
           end
 
