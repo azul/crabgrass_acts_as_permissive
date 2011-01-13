@@ -78,7 +78,7 @@ class User < ActiveRecord::Base
     @current = value
   end
 
-  def entity_access_cache
+  def access_codes
     self.entities.map(&:id)
   end
 end
@@ -131,13 +131,13 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
   def test_permission_functions
     @fusion.allow! @soul, :burdon
     @fusion.allow! @jazz, [:pester, :spy, :see]
-    assert @fusion.allows?(:pester), "fusion should allow me to pester as I am a jazz member."
-    assert !@fusion.allows?(:burdon), "fusion should not allow me to burdon as I am not a soul member."
+    assert @fusion.has_access?(:pester), "fusion should allow me to pester as I am a jazz member."
+    assert !@fusion.has_access?(:burdon), "fusion should not allow me to burdon as I am not a soul member."
     # I'm a soul member now
     @soul.users << @me
     @me.reload
     @fusion.reload
-    assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
+    assert @fusion.has_access?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
   def test_setting_permissions_per_action
@@ -145,20 +145,20 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     @fusion.allow! :burdon => [@soul, @jazz],
       :pester => @jazz,
       :see => @jazz
-    assert @fusion.allows?(:pester), "fusion should allow me to pester as I am a jazz member."
-    assert !@fusion.allows?(:spy), "fusion should not allow me to spy as I am not a soul member."
+    assert @fusion.has_access?(:pester), "fusion should allow me to pester as I am a jazz member."
+    assert !@fusion.has_access?(:spy), "fusion should not allow me to spy as I am not a soul member."
     # I'm a soul member now
     @soul.users << @me
     @me.reload
     @fusion.reload
-    assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
+    assert @fusion.has_access?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
 
   def test_keys_in_different_class
     @brave_new = Society.create!
     @brave_new.allow! @jazz, :publish
-    assert @brave_new.allows?(:publish), "the publish key should work for society"
+    assert @brave_new.has_access?(:publish), "the publish key should work for society"
     assert_raises ActsAsPermissive::PermissionError do
       @brave_new.allow! @jazz, :see
     end
@@ -170,14 +170,14 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
   def test_query_caching
     # all @jazz users may see @jazz's groups
     @jazz.allow! @jazz, :see
-    pages = Page.find :all, :include => {:owner => :current_user_permission_set}
+    pages = Page.find :all, :include => {:owner => :current_user_permissions}
     # we remove the permission but it has already been cached...
-    assert @jazz.allows?(:see), ":see should be allowed to current_user."
+    assert @jazz.has_access?(:see), ":see should be allowed to current_user."
     @jazz.disallow!(@jazz, :see)
     @jazz.reload
-    assert !@jazz.allows?(:see), "the :see permission should have been revoked."
+    assert !@jazz.has_access?(:see), "the :see permission should have been revoked."
     assert_equal @miles, pages.first
-    assert pages.first.owner.allows?(:see), "pages should have cached the permission."
+    assert pages.first.owner.has_access?(:see), "pages should have cached the permission."
   end
 
   module ActsAsPermissive::Permissions
@@ -190,10 +190,10 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     end
     Entity.add_permissions :do_crazy_things
     @jazz.allow! @jazz, :do_crazy_things
-    assert @jazz.allows?(:do_crazy_things), "I should be able to add keys in different places"
+    assert @jazz.has_access?(:do_crazy_things), "I should be able to add keys in different places"
     @jazz.allow! @jazz, :see
     @jazz.reload
-    assert @jazz.allows?(:see), "Old keys should still work after adding new ones."
+    assert @jazz.has_access?(:see), "Old keys should still work after adding new ones."
   end
 
 
@@ -211,23 +211,6 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     p = @fusion.allow! @jazz, [:pester, :spy, :see]
     p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
     assert_equal 21, p.mask
-  end
-
-  def test_bit_mask_with_pages
-    # all @jazz members may see @jazz's groups
-    @jazz.permissions.create :mask => 2, :entity_code => @jazz.id
-    # all @soul members may see @jazz
-    @jazz.permissions.create :mask => 1, :entity_code => @soul.id
-    # I'm a soul member
-    @soul.users << @me
-    pages = Page.find :all, :include => {:owner => :current_user_permission_set}
-    assert_equal @miles, pages.first
-    # now the bitwise and of 1 and 2 is 3
-    assert_equal "3", pages.first.owner.current_user_permission_set.or_mask
-    @jazz.permissions.create :mask => 7, :entity_code => @soul.id
-    pages = Page.find :all, :include => {:owner => :current_user_permission_set}
-    # we're not just adding things up bit_or(2, 7) = 7
-    assert_equal "7", pages.first.owner.current_user_permission_set.or_mask
   end
 
 end
