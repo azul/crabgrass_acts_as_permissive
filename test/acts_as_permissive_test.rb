@@ -140,6 +140,16 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     assert @fusion.has_access?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
+  def test_getting_permissions_per_action
+    @fusion.allow! @soul, [:burdon, :spy]
+    @fusion.allow! @jazz, [:pester, :see, :burdon]
+    assert_equal @fusion.accessors_by_action, {
+      :burdon => [@soul, @jazz],
+      :pester => @jazz,
+      :spy => @soul,
+      :see => @jazz}
+  end
+
   def test_setting_permissions_per_action
     @fusion.allow! @soul, :spy
     @fusion.allow! :burdon => [@soul, @jazz],
