@@ -153,18 +153,34 @@ module ActsAsPermissive
             permission.disallow! disallow.map(&:first)
           end
 
-
-          def allow!(entity, keys, options = {})
-            code = code_for_entity(entity)
-            permission = permissions.find_or_initialize_by_entity_code(code)
-            permission.allow! keys, options
+          def allow!(*args)
+            ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
+              code = code_for_entity(entity)
+              permission = permissions.find_or_initialize_by_entity_code(code)
+              permission.allow! keys, options || {}
+            end
           end
 
-          def disallow!(entity, keys)
-            code = code_for_entity(entity)
-            permission = permissions.find_by_entity_code(code)
-            permission.disallow!(keys) if permission
+          def disallow!(*args)
+            ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
+              code = code_for_entity(entity)
+              permission = permissions.find_by_entity_code(code)
+              permission.disallow!(keys) if permission
+            end
           end
+
+          def accessors_by_action
+            permissions.inject({}) do |hash, perm|
+              perm.actions.each do |action|
+                hash[action] ||= []
+                hash[action].push perm.accessors
+              end
+            end
+          end
+
+
+
+          protected
 
           def code_for_entity(entity)
             entity = entity.to_sym if entity.is_a? String
@@ -236,6 +252,19 @@ module ActsAsPermissive
       hash = @@hash[key_for_class(klass)]
       array = hash.map{|k,b| k if (bits & b) != 0}
       array.compact
+    end
+
+    def self.get_entities_from_args(*args)
+      if args[0].is_a? Hash
+        args[0].each_pair do |key, entities|
+          entities = [entities] unless entities.is_a? Array
+          entities.each do |entity|
+            yield entity, key, args[1]
+          end
+        end
+      else
+        yield *args
+      end
     end
 
 

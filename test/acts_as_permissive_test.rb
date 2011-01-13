@@ -140,6 +140,21 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
   end
 
+  def test_setting_permissions_per_action
+    @fusion.allow! @soul, :spy
+    @fusion.allow! :burdon => [@soul, @jazz],
+      :pester => @jazz,
+      :see => @jazz
+    assert @fusion.allows?(:pester), "fusion should allow me to pester as I am a jazz member."
+    assert !@fusion.allows?(:spy), "fusion should not allow me to spy as I am not a soul member."
+    # I'm a soul member now
+    @soul.users << @me
+    @me.reload
+    @fusion.reload
+    assert @fusion.allows?([:burdon, :spy, :see]), "combining access from different entities should work."
+  end
+
+
   def test_keys_in_different_class
     @brave_new = Society.create!
     @brave_new.allow! @jazz, :publish
