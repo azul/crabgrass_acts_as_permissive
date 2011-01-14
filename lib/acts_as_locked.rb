@@ -1,51 +1,52 @@
 require 'activesupport'
 
-module ActsAsPermissive
+module ActsAsLocked
 
-  class PermissionError < StandardError; end;
+  class AccessError < StandardError; end;
 
   def self.included(base)
     base.class_eval do
-      # This allows you to define permissions on the object that acts as permissive.
-      # Permission resolution uses entity codes so that we can resolve permissions
-      # via groups without joins
+      # This allows you to define access on the object that act as locked.
+      # A locked object can have different locks for different actions.
+      # Access is granted via keys that belong to a keyring.
+      # Keys can open different locks (realized via a bitmap)
 
-      def self.acts_as_permissive(*permissions)
+      def self.acts_as_locked(*locks)
 
-        has_many :permissions, :as => :object do
+        has_many :keys, :as => :locked do
 
-          def allow?(keys, reload=false)
+          def open?(locks, reload=false)
             self.reload if reload
-            allowed = self.inject(0) {|any, permission| any | permission.mask}
-            not_allowed = proxy_owner.class.bits_for_keys(keys) & ~allowed
-            not_allowed == 0
+            open = self.inject(0) {|any, key| any | key.mask}
+            closed = proxy_owner.class.bits_for_locks(locks) & ~open
+            closed == 0
           end
         end
 
-        # let's use AR magic to cache permissions from the controller like this...
-        # @pages = Page.find... :include => {:owner => :current_user_permissions}
-        has_many :current_user_permissions,
-          :class_name => "Permission",
-          :conditions => 'entity_code IN (#{User.current.access_codes.join(", ")})',
-          :as => :object do
-          def allow?(keys)
-            allowed = self.inject(0) {|any, permission| any | permission.mask}
-            not_allowed = proxy_owner.class.bits_for_keys(keys) & ~allowed
-            not_allowed == 0
+        # let's use AR magic to cache keyss from the controller like this...
+        # @pages = Page.find... :include => {:owner => :current_user_keys}
+        has_many :current_user_keys,
+          :class_name => "Key",
+          :conditions => 'ring_code IN (#{User.current.access_codes.join(", ")})',
+          :as => :locked do
+          def open?(locks)
+            open = self.inject(0) {|any, key| any | key.mask}
+            closed = proxy_owner.class.bits_for_locks(locks) & ~open
+            closed == 0
           end
         end
 
 
-        named_scope :with_access, lambda { |key, entity|
-          { :joins => :permissions,
-            :group => 'object_id, object_type',
-            :conditions => Permission.access_conditions_for(entity) }
+        named_scope :with_access, lambda { |holder|
+          { :joins => :keys,
+            :group => 'locked_id, locked_type',
+            :conditions => Keys.access_conditions_for(holder) }
         }
 
         class_eval do
 
-          def has_access!(key, user)
-            if has_access?(key, user)
+          def has_access!(lock, holder)
+            if has_access?(lock, holder)
               return true
             else
               # TODO: make the error message flexible and meaningful
@@ -53,46 +54,37 @@ module ActsAsPermissive
             end
           end
 
-          def has_access?(key, entity = User.current)
-            if entity == User.current
+          def has_access?(lock, holder = User.current)
+            if holder == User.current
               # these might be cached through AR.
-              current_user_permissions.allow?(key)
+              current_user_keys.open?(lock)
             else
               # the named scope might have changed so we need to reload.
-              permissions.for_entity(entity).allow?(key, true)
+              keys.for_holder(holder).open?(lock, true)
             end
           end
 
-          def public_permissions=(hash)
-            code = 1
-            permission = permissions.find_or_initialize_by_entity_code(code)
-            allow = hash.select{|k,v| v!=0}
-            disallow = hash.select{|k,v| v==0}
-            permission.allow! allow.map(&:first)
-            permission.disallow! disallow.map(&:first)
-          end
-
-          def allow!(*args)
-            ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
-              code = Permission.code_for_entity(entity)
-              permission = permissions.find_or_initialize_by_entity_code(code)
-              permission.allow! keys, options || {}
+          def grant!(*args)
+            ActsAsLocked::Locks.get_holders_from_args(*args) do |holder, locks, options|
+              code = Key.code_for_holder(holder)
+              key = keys.find_or_initialize_by_holder_code(code)
+              key.open! locks, options || {}
             end
           end
 
-          def disallow!(*args)
-            ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
-              code = Permission.code_for_entity(entity)
-              permission = permissions.find_by_entity_code(code)
-              permission.disallow!(keys) if permission
+          def revoke!(*args)
+            ActsAsLocked::Locks.get_holders_from_args(*args) do |holder, locks, options|
+              code = Key.code_for_holder(holder)
+              key = keys.find_or_initialize_by_holder_code(code)
+              key.revoke! locks, options || {}
             end
           end
 
-          def accessors_by_action
-            permissions.inject({}) do |hash, perm|
-              perm.actions.each do |action|
-                hash[action] ||= []
-                hash[action].push perm.accessors
+          def holders_by_lock
+            keys.inject({}) do |hash, key|
+              key.locks.each do |lock|
+                hash[lock] ||= []
+                hash[lock].push key.holders
               end
             end
           end
@@ -102,67 +94,67 @@ module ActsAsPermissive
           protected
 
 
-          def self.bits_for_keys(keys)
-            return ~0 if keys == :all
-            keys = [keys] unless keys.is_a? Array
-            keys.inject(0) {|any, key| any | self.bit_for(key)}
+          def self.bits_for_locks(locks)
+            return ~0 if locks == :all
+            locks = [locks] unless locks.is_a? Array
+            locks.inject(0) {|any, lock| any | self.bit_for(lock)}
           end
 
-          def self.keys_for_bits(bits)
-            ActsAsPermissive::Permissions.keys_for(self, bits)
+          def self.locks_for_bits(bits)
+            ActsAsPermissive::Permissions.locks_for(self, bits)
           end
 
-          def self.bit_for(key)
-            ActsAsPermissive::Permissions.bit_for(self, key)
+          def self.bit_for(lock)
+            ActsAsPermissive::Permissions.bit_for(self, lock)
           end
 
-          def self.add_permissions(*keys)
-            keys = keys.first if keys.first.is_a? Enumerable
-            ActsAsPermissive::Permissions.add_bits(self.name, keys)
+          def self.add_locks(*locks)
+            locks = locks.first if locks.first.is_a? Enumerable
+            ActsAsLocked::Locks.add_bits(self.name, locks)
           end
         end
-        if permissions.any?
-          self.add_permissions(*permissions)
+        if locks.any?
+          self.add_locks(*locks)
         end
       end
 
     end
   end
 
-  module Permissions
+  module Locks
 
-    def self.add_bits(class_name, keys)
+    def self.add_bits(class_name, locks)
       @@hash ||= {}
       class_hash = @@hash[class_name] ||= {}
-      if keys.is_a? Hash
-        keys.reject!{|k,v| class_hash.keys.include? k}
-      elsif keys.is_a? Enumerable
-        keys.reject!{|k| class_hash.keys.include? k}
+      if locks.is_a? Hash
+        locks.reject!{|k,v| class_hash.keys.include? k}
+      elsif locks.is_a? Enumerable
+        locks.reject!{|k| class_hash.keys.include? k}
       end
-      class_hash.merge! build_bit_hash(keys, @@hash[class_name].count)
+      class_hash.merge! build_bit_hash(locks, @@hash[class_name].count)
     end
 
-    def self.bit_for(klass, key)
-      bit = @@hash[key_for_class(klass)][key.to_s.downcase.to_sym]
+    def self.bit_for(klass, lock)
+      bit = @@hash[lock_for_class(klass)][lock.to_s.downcase.to_sym]
       if bit.nil?
-        raise ActsAsPermissive::PermissionError.new("Permission '#{key}' is unknown to class '#{klass.name}'")
+        raise ActsAsPermissive::PermissionError.new("Permission '#{lock}' is unknown to class '#{klass.name}'")
       else
         bit
       end
     end
 
-    def self.keys_for(klass, bits)
-      hash = @@hash[key_for_class(klass)]
-      array = hash.map{|k,b| k if (bits & b) != 0}
+    def self.locks_for(klass, bits)
+      hash = @@hash[lock_for_class(klass)]
+      array = hash.map{|l,b| l if (bits & b) != 0}
       array.compact
     end
 
-    def self.get_entities_from_args(*args)
+    def self.get_holders_from_args(*args)
       if args[0].is_a? Hash
-        args[0].each_pair do |key, entities|
-          entities = [entities] unless entities.is_a? Array
-          entities.each do |entity|
-            yield entity, key, args[1]
+        args[0].each_pair do |lock, holders|
+          holders = [holders] unless holders.is_a? Array
+          holders.each do |holder|
+            yield holder, lock, args[1]
           end
         end
       else
@@ -172,28 +164,28 @@ module ActsAsPermissive
 
 
     protected
-    def self.build_bit_hash(keys, offset)
+    def self.build_bit_hash(locks, offset)
       bitwise_hash = {}
-      if keys.is_a? Hash
-        keys.each do |key, value|
-          bitwise_hash[key] = 2 ** value
+      if locks.is_a? Hash
+        locks.each do |lock, value|
+          bitwise_hash[lock] = 2 ** value
         end
-      elsif keys.is_a? Enumerable
-        keys.each_with_index do |key, index|
-          bitwise_hash[key] = 2 ** (index + offset)
+      elsif locks.is_a? Enumerable
+        locks.each_with_index do |lock, index|
+          bitwise_hash[lock] = 2 ** (index + offset)
         end
       end
       bitwise_hash
     rescue ArgumentError
-      raise ActsAsPermissive::PermissionError.new("Permission bits must be integers or longs.")
+      raise ActsAsPermissive::PermissionError.new("Lock bits must be integers or longs.")
     end
 
-    def self.key_for_class(klass)
+    def self.lock_for_class(klass)
       current=klass
-      until @@hash.keys.include?(current.name) do
+      until @@hash.locks.include?(current.name) do
         current = current.superclass
         if current.nil?
-          raise ActsAsPermissive::PermissionError.new("Class #{klass} not registered with acts_as_permissive.")
+          raise ActsAsPermissive::PermissionError.new("Class #{klass} not registered with acts_as_locked.")
         end
       end
       current.name

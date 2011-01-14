@@ -12,7 +12,7 @@ ActiveRecord::Base.establish_connection(
   :host     => "localhost",
   :username => "user",
   :password => "password",
-  :database => "test_acts_as_permissive"
+  :database => "test_acts_as_locked"
 )
 
 # log db activity:
@@ -25,29 +25,29 @@ ActiveRecord::Base.establish_connection(
 def setup_db
   teardown_db
   ActiveRecord::Schema.define(:version => 1) do
-    create_table :permissions do |p|
+    create_table :keys do |p|
       p.integer :mask, :default => 0
-      p.integer :object_id
-      p.string :object_type
-      p.integer :entity_code
+      p.integer :locked_id
+      p.string :locked_type
+      p.integer :holder_code
     end
-    create_table :entities do |t|
+    create_table :styles do |t|
       t.column :name, :string
     end
     create_table :users do |t|
       t.column :name, :string
     end
-    create_table :entities_users, :id => false do |t|
+    create_table :styles_users, :id => false do |t|
       t.integer :entity_id
       t.integer :user_id
     end
-    create_table :pages do |t|
+    create_table :artists do |t|
       t.column :name, :string
-      t.column :owner_id, :integer
+      t.column :main_style_id, :integer
     end
-    create_table :entities_pages, :id => false do |t|
-      t.column :entity_id, :integer
-      t.column :page_id, :integer
+    create_table :artists_styles, :id => false do |t|
+      t.column :artist_id, :integer
+      t.column :style_id, :integer
     end
     create_table :societies
   end
@@ -61,7 +61,7 @@ end
 
 def reset_db
   ActiveRecord::Base.connection.tables.each do |table|
-    ActiveRecord::Base.connection.execute("DELETE FROM #{table};")
+    ActiveRecord::Base.connection.execute("DELETE FROM '#{table}';")
   end
 end
 
@@ -70,7 +70,7 @@ end
 ##
 
 class User < ActiveRecord::Base
-  has_and_belongs_to_many :entities
+  has_and_belongs_to_many :styles
   def self.current
     @current
   end
@@ -79,26 +79,26 @@ class User < ActiveRecord::Base
   end
 
   def access_codes
-    self.entities.map(&:id)
+    self.styles.map(&:id)
   end
 end
 
-class Page < ActiveRecord::Base
-  belongs_to :owner, :class_name => "Entity"
-  has_and_belongs_to_many :entities
+class Artist < ActiveRecord::Base
+  belongs_to :main_style, :class_name => "Style"
+  has_and_belongs_to_many :styles
 end
 
-class Entity < ActiveRecord::Base
-  has_and_belongs_to_many :pages
+class Style < ActiveRecord::Base
+  has_and_belongs_to_many :artists
   has_and_belongs_to_many :users
-  alias_method :entity_code, :id
-  # let's define the different permissions
-  acts_as_permissive :see, :see_groups, :pester, :burdon, :spy
+  alias_method :keyring_code, :id
+  # let's define the different locks
+  acts_as_locked :see, :hear, :dance
 end
 
-# some permissive class with other keys
+# some locked class with other keys
 class Society < ActiveRecord::Base
-  acts_as_permissive :publish, :play, :sing
+  acts_as_locked :publish, :play, :sing
 end
 
 ##
@@ -110,16 +110,17 @@ setup_db
 class ActsAsPermissiveTest < Test::Unit::TestCase
 
   def setup
-    @fusion = Entity.create! :name => "fusion"
-    @jazz = Entity.create! :name => "jazz"
-    @soul = Entity.create! :name => "soul"
-    @miles = Page.create! :name => "Miles", :owner => @jazz
-    @jazz.pages << @miles
-    @fusion.pages << @miles
-    @ella = @jazz.pages.create! :name => "Ella", :owner => @jazz
-    @soul.pages << @ella
-    @chick = @fusion.pages.create! :name => "Chick", :owner => @fusion
+    @fusion = Style.create! :name => "fusion"
+    @jazz = Style.create! :name => "jazz"
+    @soul = Style.create! :name => "soul"
+    @miles = Artist.create! :name => "Miles", :main_style => @jazz
+    @jazz.artists << @miles
+    @fusion.artists << @miles
+    @ella = @jazz.artists.create! :name => "Ella", :main_style => @jazz
+    @soul.artists << @ella
+    @chick = @fusion.artists.create! :name => "Chick", :main_style => @fusion
     @me = @jazz.users.create! :name => 'me'
+    *
     # login
     User.current = @me
   end
@@ -128,82 +129,75 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
     reset_db
   end
 
-  def test_permission_functions
-    @fusion.allow! @soul, :burdon
-    @fusion.allow! @jazz, [:pester, :spy, :see]
-    assert @fusion.has_access?(:pester), "fusion should allow me to pester as I am a jazz member."
-    assert !@fusion.has_access?(:burdon), "fusion should not allow me to burdon as I am not a soul member."
-    # I'm a soul member now
+  def test_key_functions
+    @fusion.grant! @soul, :dance
+    @fusion.grant! @jazz, [:hear, :see]
+    assert @fusion.has_access?(:hear), "fusion should allow me to hear as I am a jazz user."
+    assert !@fusion.has_access?(:dance), "fusion should not allow me to dance as I am not a soul user."
+    # I'm a soul user now
     @soul.users << @me
     @me.reload
     @fusion.reload
-    assert @fusion.has_access?([:burdon, :spy, :see]), "combining access from different entities should work."
+    assert @fusion.has_access?([:dance, :hear, :see]), "combining access from different holders should work."
   end
 
-  def test_getting_permissions_per_action
-    @fusion.allow! @soul, [:burdon, :spy]
-    @fusion.allow! @jazz, [:pester, :see, :burdon]
-    assert_equal @fusion.accessors_by_action, {
-      :burdon => [@soul, @jazz],
-      :pester => @jazz,
-      :spy => @soul,
-      :see => @jazz}
+  def test_getting_holders_per_lock
+    @fusion.grant! @soul, [:dance, :hear]
+    @fusion.grant! @jazz, [:hear, :see]
+    assert_equal @fusion.holders_by_lock, {
+      :hear => [@soul, @jazz],
+      :see => @jazz,
+      :dance => @soul}
   end
 
-  def test_setting_permissions_per_action
-    @fusion.allow! @soul, :spy
-    @fusion.allow! :burdon => [@soul, @jazz],
-      :pester => @jazz,
+  def test_setting_holders_per_lock
+    @fusion.grant! @soul, :dance
+    @fusion.grant! :hear => [@soul, @jazz],
       :see => @jazz
-    assert @fusion.has_access?(:pester), "fusion should allow me to pester as I am a jazz member."
-    assert !@fusion.has_access?(:spy), "fusion should not allow me to spy as I am not a soul member."
-    # I'm a soul member now
+    assert @fusion.has_access?(:hear), "fusion should allow me to pester as I am a jazz user."
+    assert !@fusion.has_access?(:dance), "fusion should not allow me to spy as I am not a soul user."
+    # I'm a soul user now
     @soul.users << @me
     @me.reload
     @fusion.reload
-    assert @fusion.has_access?([:burdon, :spy, :see]), "combining access from different entities should work."
+    assert @fusion.has_access?([:dance, :hear, :see]), "combining access from different holders should work."
   end
 
-
-  def test_keys_in_different_class
+  def test_locks_in_different_class
     @brave_new = Society.create!
-    @brave_new.allow! @jazz, :publish
+    @brave_new.grant! @jazz, :publish
     assert @brave_new.has_access?(:publish), "the publish key should work for society"
     assert_raises ActsAsPermissive::PermissionError do
-      @brave_new.allow! @jazz, :see
+      @brave_new.grant! @jazz, :see
     end
     assert_raises ActsAsPermissive::PermissionError do
-      @soul.allow! @jazz, :publish
+      @soul.grant! @jazz, :publish
     end
   end
 
   def test_query_caching
-    # all @jazz users may see @jazz's groups
+    # all @jazz users may see @jazz
     @jazz.allow! @jazz, :see
-    pages = Page.find :all, :include => {:owner => :current_user_permissions}
+    artists = Artists.find :all, :include => {:main_style => :current_user_permissions}
     # we remove the permission but it has already been cached...
     assert @jazz.has_access?(:see), ":see should be allowed to current_user."
-    @jazz.disallow!(@jazz, :see)
+    @jazz.revoke!(@jazz, :see)
     @jazz.reload
-    assert !@jazz.has_access?(:see), "the :see permission should have been revoked."
-    assert_equal @miles, pages.first
-    assert pages.first.owner.has_access?(:see), "pages should have cached the permission."
+    assert !@jazz.has_access?(:see), "the :see key should have been revoked."
+    assert_equal @miles, artists.first
+    assert artists.first.main_style.has_access?(:see), "artists should have cached the permission."
   end
 
-  module ActsAsPermissive::Permissions
-    DO_CRAZY_THINGS = 8
-  end
-
-  def test_adding_symbols
-    assert_raises ActsAsPermissive::PermissionError do
-      @jazz.allow! @jazz, :do_crazy_things
+  def test_adding_lock_symbols
+    assert_raises ActsAsLocked::PermissionError do
+      @jazz.grant! @jazz, :do_crazy_things
     end
-    Entity.add_permissions :do_crazy_things
-    @jazz.allow! @jazz, :do_crazy_things
+    Style.add_locks :do_crazy_things
+    @jazz.grant! @jazz, :do_crazy_things
     assert @jazz.has_access?(:do_crazy_things), "I should be able to add keys in different places"
-    @jazz.allow! @jazz, :see
+    @jazz.grant! @jazz, :see
     @jazz.reload
-    assert @jazz.has_access?(:see), "Old keys should still work after adding new ones."
+    assert @jazz.has_access?([:see, :do_crazy_things]), "Old keys should work with new ones."
   end
 
 
@@ -215,12 +209,13 @@ class ActsAsPermissiveTest < Test::Unit::TestCase
   #
 
   def test_bit_mask
-    @fusion.allow! @soul, :burdon
-    p = @fusion.permissions.find_by_entity_code(@soul.entity_code)
-    assert_equal 8, p.mask
-    p = @fusion.allow! @jazz, [:pester, :spy, :see]
+    Style.add_locks :do_crazy_things
+    @fusion.allow! @soul, :do_crazy_things
+    k = @fusion.keys.find_by_entity_code(@soul.entity_code)
+    assert_equal 8, k.mask
+    p = @fusion.allow! @jazz, [:see, :dance, :do_crazy_things]
     p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
-    assert_equal 21, p.mask
+    assert_equal 13, p.mask
   end
 
 end
