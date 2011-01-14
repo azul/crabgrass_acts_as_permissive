@@ -63,8 +63,8 @@ class Permission < ActiveRecord::Base
     end
   end
 
-  def accessors
-    prefix = case self.entity_code.to_s
+  def accessor_type
+    case self.entity_code.to_s
     when "1"
       :public
     when /^1\d+/
@@ -76,7 +76,42 @@ class Permission < ActiveRecord::Base
     when /^9\d+/
       :peers
     else
-      raise ActsAsPermissive::PermissionError "unknown entity code"
+      raise ActsAsPermissive::PermissionError.new "unknown entity code: #{self.entity_code}"
+    end
+  end
+
+  def accessors
+    case self.entity_code.to_s
+    when "1"
+      :public
+    when /^1(\d+)/
+      User.find($1)
+    when /^7(\d+)/
+      :friends
+    when /^8(\d+)/
+      Group.find($1)
+    when /^9(\d+)/
+      :peers
+    else
+      raise ActsAsPermissive::PermissionError.new "unknown entity code: #{self.entity_code}"
+    end
+  end
+
+  def self.code_for_entity(entity)
+    entity = entity.to_sym if entity.is_a? String
+    case entity
+    when :all,:public
+      1
+    when :friends
+      self.friends.entity_code.to_i
+    when :peers
+      self.peers.entity_code.to_i
+    when :self, :members
+      self.entity_code.to_i
+    when Symbol
+      raise ActsAsPermissive::PermissionError.new("ActsAsPermissive: Entity alias '#{entity}' is unknown.")
+    else
+      code = entity.entity_code.to_i
     end
   end
 end
@@ -155,7 +190,7 @@ module ActsAsPermissive
 
           def allow!(*args)
             ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
-              code = code_for_entity(entity)
+              code = Permission.code_for_entity(entity)
               permission = permissions.find_or_initialize_by_entity_code(code)
               permission.allow! keys, options || {}
             end
@@ -163,7 +198,7 @@ module ActsAsPermissive
 
           def disallow!(*args)
             ActsAsPermissive::Permissions.get_entities_from_args(*args) do |entity, keys, options|
-              code = code_for_entity(entity)
+              code = Permission.code_for_entity(entity)
               permission = permissions.find_by_entity_code(code)
               permission.disallow!(keys) if permission
             end
@@ -182,23 +217,6 @@ module ActsAsPermissive
 
           protected
 
-          def code_for_entity(entity)
-            entity = entity.to_sym if entity.is_a? String
-            case entity
-            when :all,:public
-              1
-            when :friends
-              self.friends.entity_code.to_i
-            when :peers
-              self.peers.entity_code.to_i
-            when :self, :members
-              self.entity_code.to_i
-            when Symbol
-              raise ActsAsPermissive::PermissionError.new("ActsAsPermissive: Entity alias '#{entity}' is unknown.")
-            else
-              code = entity.entity_code.to_i
-            end
-          end
 
           def self.bits_for_keys(keys)
             return ~0 if keys == :all
@@ -223,6 +241,7 @@ module ActsAsPermissive
           self.add_permissions(*permissions)
         end
       end
+
     end
   end
 
