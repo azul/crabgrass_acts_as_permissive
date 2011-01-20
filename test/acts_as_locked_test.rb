@@ -177,7 +177,7 @@ class ActsAsLockedTest < Test::Unit::TestCase
 
   def test_query_caching
     # all @jazz users may see @jazz
-    @jazz.allow! @jazz, :see
+    @jazz.grant! @jazz, :see
     artists = Artists.find :all, :include => {:main_style => :current_user_permissions}
     # we remove the permission but it has already been cached...
     assert @jazz.has_access?(:see), ":see should be allowed to current_user."
@@ -210,10 +210,10 @@ class ActsAsLockedTest < Test::Unit::TestCase
 
   def test_bit_mask
     Style.add_locks :do_crazy_things
-    @fusion.allow! @soul, :do_crazy_things
+    @fusion.grant! @soul, :do_crazy_things
     k = @fusion.keys.find_by_entity_code(@soul.entity_code)
     assert_equal 8, k.mask
-    p = @fusion.allow! @jazz, [:see, :dance, :do_crazy_things]
+    p = @fusion.grant! @jazz, [:see, :dance, :do_crazy_things]
     p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
     assert_equal 13, p.mask
   end
