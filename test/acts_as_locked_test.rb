@@ -61,7 +61,7 @@ end
 
 def reset_db
   ActiveRecord::Base.connection.tables.each do |table|
-    ActiveRecord::Base.connection.execute("DELETE FROM '#{table}';")
+    ActiveRecord::Base.connection.execute("DELETE FROM `#{table}`;")
   end
 end
 
@@ -107,7 +107,7 @@ end
 
 setup_db
 
-class ActsAsPermissiveTest < Test::Unit::TestCase
+class ActsAsLockedTest < Test::Unit::TestCase
 
   def setup
     @fusion = Style.create! :name => "fusion"
