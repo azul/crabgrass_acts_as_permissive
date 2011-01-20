@@ -1,4 +1,4 @@
-module ActsAsPermissive
+module ActsAsLocked
   class Key < ActiveRecord::Base
     belongs_to :locked, :polymorphic => true
 
