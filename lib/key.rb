@@ -2,30 +2,15 @@ module ActsAsLocked
   class Key < ActiveRecord::Base
     belongs_to :locked, :polymorphic => true
 
-    named_scope :for_user, lambda { |user|
-      { :conditions => "keyring_code IN (#{user.access_codes.join(", ")})" }
-    }
-
     named_scope :for_holder, lambda { |holder|
       { :conditions => access_conditions_for(holder) }
     }
 
-    def self.access_conditions_for(holder)
-      case holder
-      when User
-        "keyring_code IN (#{holder.access_codes.join(", ")})"
-      when :public, :all
-        {:keyring_code => 1}
-      when UnauthenticatedUser
-        {:keyring_code => 1}
-      when nil
-        {:keyring_code => 1}
-      else
-        {:keyring_code => holder.entity_code}
-      end
-    end
+    named_scope :for_public, :conditions => "keyring_code IS NULL"
 
-    named_scope :for_public, :conditions => {:holder_code => 0}
+    cattr_accessor :symbol_codes
+    cattr_accessor :holder_klass
+    cattr_accessor :holder_block
 
     def open!(locks, options = {})
       if options[:reset]
@@ -62,31 +47,51 @@ module ActsAsLocked
       end
     end
 
-    def holder_type
-      case self.keyring_code.to_s
-      when "0"
-        :public
+    def holder
+      ActsAsLocked::Key.holder_for(self.keyring_code)
+    end
+
+    def self.access_conditions_for(holder)
+      if holder.is_a? Symbol and code = self.symbol_codes[holder]
+        {keyring_code => code}
+      elsif holder.responds_to? :access_codes
+        "keyring_code IN (#{holder.access_codes.join(", ")})"
+      elsif holder.responds_to? :keyring_code
+        {keyring_code => holder.keyring_code}
       else
-        raise ActsAsPermissive::PermissionError.new "unknown entity code: #{self.entity_code}"
+        "keyring_code IS NULL"
       end
     end
 
-    def holder
-      case self.keyring_code.to_s
-      when "0"
-        :public
-      else
-        raise ActsAsPermissive::PermissionError.new "unknown entity code: #{self.entity_code}"
+    def self.holder_for(keyring_code)
+      if self.holder_klass
+        self.holder_klass.find(keyring_code)
+      elsif self.holder_block
+        self.holder_block(keyring_code)
+      end
+    end
+
+    # There are two ways of using this...
+    # if all holders are of one class and the code is the id use
+    #   resolve_holder Klass
+    # otherwise you need to specify a decoding function
+    #   resolve_holder do ...
+    #
+    def self.resolve_holder(klass = nil, &block)
+      if block_given?
+        self.holder_block = block
+      elsif klass.is_a? Class
+        self.holder_klass = klass
+      elsif klass.is_a? Symbol or klass.is_a? String
+        self.holder_klass = klass.to_s.capitalize.constantize
       end
     end
 
     def self.code_for_holder(holder)
       holder = holder.to_sym if holder.is_a? String
-      case older
-      when :all,:public
-        0
-      when Symbol
-        raise ActsAsPermissive::PermissionError.new("ActsAsPermissive: Entity alias '#{entity}' is unknown.")
+      if holder.is_a? Symbol
+        symbol_codes[holder] or
+        raise ActsAsLocked::LockError.new("ActsAsLocked: Entity alias '#{holder}' is unknown.")
       else
         holder.keyring_code
       end

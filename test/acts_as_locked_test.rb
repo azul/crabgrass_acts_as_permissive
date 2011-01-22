@@ -94,6 +94,7 @@ class Style < ActiveRecord::Base
   alias_method :keyring_code, :id
   # let's define the different locks
   acts_as_locked :see, :hear, :dance
+  ActsAsLocked::Key.resolve_holder :style
 end
 
 # some locked class with other keys
@@ -143,10 +144,11 @@ class ActsAsLockedTest < Test::Unit::TestCase
   def test_getting_holders_per_lock
     @fusion.grant! @soul, [:dance, :hear]
     @fusion.grant! @jazz, [:hear, :see]
-    assert_equal @fusion.holders_by_lock, {
+    expected = {
       :hear => [@soul, @jazz],
-      :see => @jazz,
-      :dance => @soul}
+      :see => [@jazz],
+      :dance => [@soul]}
+    assert_equal expected, @fusion.holders_by_lock
   end
 
   def test_setting_holders_per_lock
