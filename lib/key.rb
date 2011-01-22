@@ -27,7 +27,7 @@ module ActsAsLocked
 
     named_scope :for_public, :conditions => {:holder_code => 0}
 
-    def allow!(locks, options = {})
+    def open!(locks, options = {})
       if options[:reset]
         self.mask = bits_for_locks(locks)
       else
@@ -36,17 +36,17 @@ module ActsAsLocked
       save
     end
 
-    def disallow!(locks)
+    def revoke!(locks)
       self.mask &= ~bits_for_locks(locks)
       save
     end
 
     def bits_for_locks(locks)
-      self.object.class.bits_for_locks(locks)
+      self.locked.class.bits_for_locks(locks)
     end
 
     def locks(options={})
-      klass = self.object.class
+      klass = self.locked.class
       if options[:disabled]
         locks = klass.locks_for_bits(~self.mask)
       else
@@ -88,7 +88,7 @@ module ActsAsLocked
       when Symbol
         raise ActsAsPermissive::PermissionError.new("ActsAsPermissive: Entity alias '#{entity}' is unknown.")
       else
-        code = entity.entity_code.to_i
+        holder.keyring_code
       end
     end
   end

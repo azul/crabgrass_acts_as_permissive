@@ -3,7 +3,7 @@ require "#{File.dirname(__FILE__)}/key.rb"
 
 module ActsAsLocked
 
-  class AccessError < StandardError; end;
+  class LockError < StandardError; end;
 
   def self.included(base)
     base.class_eval do
@@ -28,7 +28,7 @@ module ActsAsLocked
         # @pages = Page.find... :include => {:owner => :current_user_keys}
         has_many :current_user_keys,
           :class_name => "Key",
-          :conditions => 'ring_code IN (#{User.current.access_codes.join(", ")})',
+          :conditions => 'keyring_code IN (#{User.current.access_codes.join(", ")})',
           :as => :locked do
           def open?(locks)
             open = self.inject(0) {|any, key| any | key.mask}
@@ -51,7 +51,7 @@ module ActsAsLocked
               return true
             else
               # TODO: make the error message flexible and meaningful
-              raise PermissionDenied.new(I18n.t(:permission_denied))
+              raise LockDenied.new(I18n.t(:permission_denied))
             end
           end
 
@@ -68,16 +68,17 @@ module ActsAsLocked
           def grant!(*args)
             ActsAsLocked::Locks.get_holders_from_args(*args) do |holder, locks, options|
               code = Key.code_for_holder(holder)
-              key = keys.find_or_initialize_by_holder_code(code)
+              key = keys.find_or_initialize_by_keyring_code(code)
               key.open! locks, options || {}
             end
           end
 
+          # no options so far
           def revoke!(*args)
             ActsAsLocked::Locks.get_holders_from_args(*args) do |holder, locks, options|
               code = Key.code_for_holder(holder)
-              key = keys.find_or_initialize_by_holder_code(code)
-              key.revoke! locks, options || {}
+              key = keys.find_or_initialize_by_keyring_code(code)
+              key.revoke! locks
             end
           end
 
@@ -85,8 +86,9 @@ module ActsAsLocked
             keys.inject({}) do |hash, key|
               key.locks.each do |lock|
                 hash[lock] ||= []
-                hash[lock].push key.holders
+                hash[lock].push key.holder
               end
+              hash
             end
           end
 
@@ -102,11 +104,11 @@ module ActsAsLocked
           end
 
           def self.locks_for_bits(bits)
-            ActsAsPermissive::Permissions.locks_for(self, bits)
+            ActsAsLocked::Locks.locks_for(self, bits)
           end
 
           def self.bit_for(lock)
-            ActsAsPermissive::Permissions.bit_for(self, lock)
+            ActsAsLocked::Locks.bit_for(self, lock)
           end
 
           def self.add_locks(*locks)
@@ -138,7 +140,7 @@ module ActsAsLocked
     def self.bit_for(klass, lock)
       bit = @@hash[lock_for_class(klass)][lock.to_s.downcase.to_sym]
       if bit.nil?
-        raise ActsAsPermissive::PermissionError.new("Permission '#{lock}' is unknown to class '#{klass.name}'")
+        raise ActsAsLocked::LockError.new("Lock '#{lock}' is unknown to class '#{klass.name}'")
       else
         bit
       end
@@ -178,15 +180,15 @@ module ActsAsLocked
       end
       bitwise_hash
     rescue ArgumentError
-      raise ActsAsPermissive::PermissionError.new("Lock bits must be integers or longs.")
+      raise ActsAsLocked::LockError.new("Lock bits must be integers or longs.")
     end
 
     def self.lock_for_class(klass)
       current=klass
-      until @@hash.locks.include?(current.name) do
+      until @@hash.keys.include?(current.name) do
         current = current.superclass
         if current.nil?
-          raise ActsAsPermissive::PermissionError.new("Class #{klass} not registered with acts_as_locked.")
+          raise ActsAsLocked::LockError.new("Class #{klass} not registered with acts_as_locked.")
         end
       end
       current.name

@@ -29,7 +29,7 @@ def setup_db
       p.integer :mask, :default => 0
       p.integer :locked_id
       p.string :locked_type
-      p.integer :holder_code
+      p.integer :keyring_code
     end
     create_table :styles do |t|
       t.column :name, :string
@@ -38,7 +38,7 @@ def setup_db
       t.column :name, :string
     end
     create_table :styles_users, :id => false do |t|
-      t.integer :entity_id
+      t.integer :style_id
       t.integer :user_id
     end
     create_table :artists do |t|
@@ -120,7 +120,6 @@ class ActsAsLockedTest < Test::Unit::TestCase
     @soul.artists << @ella
     @chick = @fusion.artists.create! :name => "Chick", :main_style => @fusion
     @me = @jazz.users.create! :name => 'me'
-    *
     # login
     User.current = @me
   end
@@ -167,10 +166,10 @@ class ActsAsLockedTest < Test::Unit::TestCase
     @brave_new = Society.create!
     @brave_new.grant! @jazz, :publish
     assert @brave_new.has_access?(:publish), "the publish key should work for society"
-    assert_raises ActsAsPermissive::PermissionError do
+    assert_raises ActsAsLocked::LockError do
       @brave_new.grant! @jazz, :see
     end
-    assert_raises ActsAsPermissive::PermissionError do
+    assert_raises ActsAsLocked::LockError do
       @soul.grant! @jazz, :publish
     end
   end
@@ -178,7 +177,7 @@ class ActsAsLockedTest < Test::Unit::TestCase
   def test_query_caching
     # all @jazz users may see @jazz
     @jazz.grant! @jazz, :see
-    artists = Artists.find :all, :include => {:main_style => :current_user_permissions}
+    artists = Artist.find :all, :include => {:main_style => :current_user_keys}
     # we remove the permission but it has already been cached...
     assert @jazz.has_access?(:see), ":see should be allowed to current_user."
     @jazz.revoke!(@jazz, :see)
@@ -189,7 +188,7 @@ class ActsAsLockedTest < Test::Unit::TestCase
   end
 
   def test_adding_lock_symbols
-    assert_raises ActsAsLocked::PermissionError do
+    assert_raises ActsAsLocked::LockError do
       @jazz.grant! @jazz, :do_crazy_things
     end
     Style.add_locks :do_crazy_things
@@ -211,10 +210,10 @@ class ActsAsLockedTest < Test::Unit::TestCase
   def test_bit_mask
     Style.add_locks :do_crazy_things
     @fusion.grant! @soul, :do_crazy_things
-    k = @fusion.keys.find_by_entity_code(@soul.entity_code)
+    k = @fusion.keys.find_by_keyring_code(@soul.keyring_code)
     assert_equal 8, k.mask
     p = @fusion.grant! @jazz, [:see, :dance, :do_crazy_things]
-    p = @fusion.permissions.find_by_entity_code(@jazz.entity_code)
+    p = @fusion.keys.find_by_keyring_code(@jazz.keyring_code)
     assert_equal 13, p.mask
   end
 
