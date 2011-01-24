@@ -86,6 +86,7 @@ end
 class Artist < ActiveRecord::Base
   belongs_to :main_style, :class_name => "Style"
   has_and_belongs_to_many :styles
+  def keyring_code; 100 + id; end
 end
 
 class Style < ActiveRecord::Base
@@ -174,6 +175,22 @@ class ActsAsLockedTest < Test::Unit::TestCase
     assert_raises ActsAsLocked::LockError do
       @soul.grant! @jazz, :publish
     end
+  end
+
+  def test_locks_with_different_holder_types
+    ActsAsLocked::Key.resolve_holder do |code|
+      code > 100 ?
+        Artist.find(code -100) :
+        Style.find(code)
+    end
+    @jazz.grant! @soul, :see
+    @jazz.grant! @miles, [:see, :dance]
+    expected = {
+      :see => [@soul, @miles],
+      :dance => [@miles]}
+    assert_equal expected, @jazz.holders_by_lock
+
+    ActsAsLocked::Key.resolve_holder :style
   end
 
   def test_query_caching

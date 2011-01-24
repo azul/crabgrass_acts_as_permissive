@@ -66,8 +66,8 @@ module ActsAsLocked
     def self.holder_for(keyring_code)
       if self.holder_klass
         self.holder_klass.find(keyring_code)
-      elsif self.holder_block
-        self.holder_block(keyring_code)
+      elsif !self.holder_block.nil?
+        self.holder_block.call(keyring_code)
       end
     end
 
@@ -80,6 +80,7 @@ module ActsAsLocked
     def self.resolve_holder(klass = nil, &block)
       if block_given?
         self.holder_block = block
+        self.holder_klass = nil
       elsif klass.is_a? Class
         self.holder_klass = klass
       elsif klass.is_a? Symbol or klass.is_a? String
