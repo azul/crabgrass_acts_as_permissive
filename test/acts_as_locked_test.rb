@@ -189,8 +189,40 @@ class ActsAsLockedTest < Test::Unit::TestCase
       :see => [@soul, @miles],
       :dance => [@miles]}
     assert_equal expected, @jazz.holders_by_lock
-
     ActsAsLocked::Key.resolve_holder :style
+  end
+
+
+  def test_locks_with_symbolic_holders
+    ActsAsLocked::Key.symbol_codes = {
+      :public => 500,
+      :all => 500,
+      :admin => 501,
+      :other => 502
+    }
+    ActsAsLocked::Key.resolve_holder do |code|
+      case code
+      when 1...100
+        Style.find(code)
+      when 100...200
+        Artist.find(code -100)
+      when 500...510
+        ActsAsLocked::Key.symbol_for(code)
+      end
+    end
+    @jazz.grant! :admin, [:see, :dance]
+    assert_raises ActsAsLocked::LockError do
+      @jazz.grant! :foo, [:see, :dance]
+    end
+    @jazz.grant! @soul, :see
+    @jazz.grant! @miles, :hear
+    expected = {
+      :see => [:admin, @soul],
+      :dance => [:admin],
+      :hear => [@miles]}
+    assert_equal expected, @jazz.holders_by_lock
+    ActsAsLocked::Key.resolve_holder :style
+    ActsAsLocked::Key.symbol_codes = {}
   end
 
   def test_query_caching

@@ -88,6 +88,11 @@ module ActsAsLocked
       end
     end
 
+
+    def self.symbol_for(code)
+      symbol_codes.detect{|k,v| v == code}.first
+    end
+
     def self.code_for_holder(holder)
       holder = holder.to_sym if holder.is_a? String
       if holder.is_a? Symbol
